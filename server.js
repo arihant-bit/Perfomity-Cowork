@@ -206,6 +206,8 @@ app.post('/api/launch-campaign', auth, async (req, res) => {
     let token = accessToken;
     let actId = adAccountId;
     let pgId = pageId;
+    let pxId = pixelId;
+    let igId = instagramId;
 
     if (clientId) {
       const client = await Client.findOne({ _id: clientId, userId: req.user.id });
@@ -213,79 +215,97 @@ app.post('/api/launch-campaign', auth, async (req, res) => {
         token = token || client.accessToken;
         actId = actId || client.adAccountId;
         pgId = pgId || client.pageId;
+        pxId = pxId || client.pixelId;
+        igId = igId || client.instagramId;
       }
     }
 
     if (!token) throw new Error('No access token provided');
     if (!actId) throw new Error('No ad account ID provided');
+    if (!pgId) throw new Error('No Facebook Page ID provided — add it in Clients');
 
     const accountPath = `/act_${actId.replace('act_', '')}`;
-    const budgetPaise = Math.round(adsetDailyBudget * 100); // Meta uses cents/paise
+    const budgetPaise = Math.round(adsetDailyBudget * 100);
 
-    // ── STEP 1: Create Campaign (no budget at campaign level for ABO) ──
+    console.log(`Launching campaign: ${campaignName}`);
+    console.log(`Account: ${actId}, Page: ${pgId}, Pixel: ${pxId}`);
+
+    // ── STEP 1: Create Campaign ──
     const campaign = await metaPost(`${accountPath}/campaigns`, token, {
       name: campaignName,
       objective: 'OUTCOME_SALES',
       status: 'PAUSED',
-      special_ad_categories: '[]'
+      special_ad_categories: JSON.stringify([])
     });
     const campaignId = campaign.id;
+    console.log(`Campaign created: ${campaignId}`);
 
     // ── STEP 2: Build targeting spec ──
-    const { ageMin = 18, ageMax = 65, genders = [], countries = ['IN'], interests = [] } = targeting || {};
-    const targetingSpec = {
+    const { ageMin = 18, ageMax = 65, genders = [], countries = ['IN'] } = targeting || {};
+    const targetingObj = {
       age_min: ageMin,
       age_max: ageMax,
-      geo_locations: JSON.stringify({ countries }),
+      geo_locations: { countries: Array.isArray(countries) ? countries : [countries] },
+      facebook_positions: ['feed', 'instagram_stream'],
+      device_platforms: ['mobile', 'desktop'],
+      publisher_platforms: ['facebook', 'instagram']
     };
-    if (genders.length) targetingSpec.genders = JSON.stringify(genders);
-    if (interests.length) targetingSpec.flexible_spec = JSON.stringify([{ interests }]);
+    if (genders && genders.length) targetingObj.genders = genders;
 
-    // ── STEP 3: Create Ad Sets (one per targeting variation) ──
+    // ── STEP 3: Create Ad Sets ──
     const adsetIds = [];
     for (let i = 0; i < numAdsets; i++) {
-      const adset = await metaPost(`${accountPath}/adsets`, token, {
+      const adsetBody = {
         name: `${campaignName} - AdSet ${i + 1}`,
         campaign_id: campaignId,
         daily_budget: budgetPaise,
         billing_event: 'IMPRESSIONS',
         optimization_goal: 'OFFSITE_CONVERSIONS',
         status: 'PAUSED',
-        start_time: Math.floor(Date.now() / 1000),
-        ...targetingSpec,
-        ...(pixelId ? {
-          promoted_object: JSON.stringify({
-            pixel_id: pixelId,
-            custom_event_type: 'PURCHASE'
-          })
-        } : {})
-      });
+        targeting: JSON.stringify(targetingObj),
+        start_time: Math.floor(Date.now() / 1000) + 60,
+      };
+
+      // Only add promoted_object if pixel exists
+      if (pxId) {
+        adsetBody.promoted_object = JSON.stringify({
+          pixel_id: pxId,
+          custom_event_type: 'PURCHASE'
+        });
+      }
+
+      console.log(`Creating adset ${i + 1}...`);
+      const adset = await metaPost(`${accountPath}/adsets`, token, adsetBody);
       adsetIds.push(adset.id);
+      console.log(`Adset created: ${adset.id}`);
     }
 
-    // ── STEP 4: Create Ads (one per copy variant per adset) ──
+    // ── STEP 4: Create Ads ──
     const adIds = [];
+    const selectedCopies = copies.filter(c => c._selected !== false).slice(0, 3);
+
     for (const adsetId of adsetIds) {
-      for (let j = 0; j < Math.min(copies.length, 3); j++) {
-        const copy = copies[j];
+      for (let j = 0; j < selectedCopies.length; j++) {
+        const copy = selectedCopies[j];
+        const siteUrl = websiteUrl || 'https://facebook.com';
 
-        // Build creative object
-        const objectStory = {
-          page_id: pgId,
-          link_data: {
-            message: copy.primaryText,
-            link: websiteUrl || 'https://facebook.com',
-            name: copy.headline,
-            call_to_action: { type: 'SHOP_NOW', value: { link: websiteUrl || 'https://facebook.com' } }
-          }
+        const linkDataObj = {
+          message: copy.primaryText,
+          link: siteUrl,
+          name: copy.headline,
+          call_to_action: { type: 'SHOP_NOW', value: { link: siteUrl } }
         };
-        if (imageHash) objectStory.link_data.image_hash = imageHash;
-        if (instagramId) objectStory.instagram_user_id = instagramId;
+        if (imageHash) linkDataObj.image_hash = imageHash;
 
+        const objectStoryObj = { page_id: pgId, link_data: linkDataObj };
+        if (igId) objectStoryObj.instagram_user_id = igId;
+
+        console.log(`Creating creative for ad ${j + 1}...`);
         const creative = await metaPost(`${accountPath}/adcreatives`, token, {
-          name: `Creative - ${copy.headline.substring(0, 30)}`,
-          object_story_spec: JSON.stringify(objectStory)
+          name: `${campaignName} - Creative ${j + 1}`,
+          object_story_spec: JSON.stringify(objectStoryObj)
         });
+        console.log(`Creative created: ${creative.id}`);
 
         const ad = await metaPost(`${accountPath}/ads`, token, {
           name: `${campaignName} - Ad ${j + 1}`,
@@ -294,6 +314,7 @@ app.post('/api/launch-campaign', auth, async (req, res) => {
           status: 'PAUSED'
         });
         adIds.push(ad.id);
+        console.log(`Ad created: ${ad.id}`);
       }
     }
 
