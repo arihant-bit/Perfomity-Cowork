@@ -166,10 +166,12 @@ const META_API = 'https://graph.facebook.com/v21.0';
 async function metaPost(path, token, body) {
   const url = `${META_API}${path}`;
   const form = new URLSearchParams({ access_token: token, ...body });
+  console.log(`META POST ${path}`, JSON.stringify(body).substring(0, 300));
   const res = await fetch(url, { method: 'POST', body: form });
   const data = await res.json();
   if (data.error) {
-    const msg = `Meta API Error ${data.error.code}: ${data.error.message}`;
+    const msg = `Meta API Error ${data.error.code} (${data.error.error_subcode || 'no subcode'}): ${data.error.message} | error_user_msg: ${data.error.error_user_msg || 'none'} | fbtrace: ${data.error.fbtrace_id || 'none'}`;
+    console.error(`META ERROR on ${path}:`, JSON.stringify(data.error));
     throw new Error(msg);
   }
   return data;
