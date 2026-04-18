@@ -231,11 +231,15 @@ app.post('/api/launch-campaign', auth, async (req, res) => {
     console.log(`Account: ${actId}, Page: ${pgId}, Pixel: ${pxId}`);
 
     // ── STEP 1: Create Campaign ──
+    // Test token first
+    const tokenTest = await metaGet(`/me`, token, { fields: 'id,name' });
+    console.log(`Token valid for: ${tokenTest.name} (${tokenTest.id})`);
+
     const campaign = await metaPost(`${accountPath}/campaigns`, token, {
       name: campaignName,
       objective: 'OUTCOME_SALES',
       status: 'PAUSED',
-      special_ad_categories: JSON.stringify([])
+      special_ad_categories: 'NONE'
     });
     const campaignId = campaign.id;
     console.log(`Campaign created: ${campaignId}`);
