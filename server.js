@@ -253,7 +253,8 @@ app.post('/api/launch-campaign', auth, async (req, res) => {
       age_min: ageMin,
       age_max: ageMax,
       geo_locations: { countries: Array.isArray(countries) ? countries : [countries] },
-      facebook_positions: ['feed', 'instagram_stream'],
+      facebook_positions: ['feed'],
+      instagram_positions: ['stream'],
       device_platforms: ['mobile', 'desktop'],
       publisher_platforms: ['facebook', 'instagram']
     };
