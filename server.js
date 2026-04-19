@@ -241,7 +241,8 @@ app.post('/api/launch-campaign', auth, async (req, res) => {
       name: campaignName,
       objective: 'OUTCOME_SALES',
       status: 'PAUSED',
-      special_ad_categories: 'NONE'
+      special_ad_categories: 'NONE',
+      is_adset_budget_sharing_enabled: 'false'
     });
     const campaignId = campaign.id;
     console.log(`Campaign created: ${campaignId}`);
