@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -9,7 +10,11 @@ app.use(cors());
 app.use(express.json());
 
 // ─── DB CONNECTION ────────────────────────────────────────────────────────────
-mongoose.connect(process.env.MONGODB_URI).then(() => console.log('MongoDB connected'));
+// A failed connection is logged instead of crashing the process, so /health stays up and reports the DB state.
+if (!process.env.MONGODB_URI) console.error('MONGODB_URI is not set');
+else mongoose.connect(process.env.MONGODB_URI)
+  .then(() => console.log('MongoDB connected'))
+  .catch(e => console.error('MongoDB connection failed:', e.message));
 
 // ─── SCHEMAS ──────────────────────────────────────────────────────────────────
 const UserSchema = new mongoose.Schema({
@@ -385,7 +390,10 @@ app.get('/api/campaign-logs', auth, async (req, res) => {
 });
 
 // ─── HEALTH ───────────────────────────────────────────────────────────────────
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '2.1' }));
+app.get('/health', (req, res) => {
+  const db = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+  res.status(db === 'connected' ? 200 : 503).json({ status: db === 'connected' ? 'ok' : 'degraded', db, version: '2.1' });
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Perfomity Cowork v2.1 running on port ${PORT}`));
